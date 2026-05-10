@@ -13,3 +13,6 @@ coverage/
 v2ray-core/
 v2ray-config.json
 v2ray.db
+__pycache__/
+**/__pycache__/
+*.pyc
