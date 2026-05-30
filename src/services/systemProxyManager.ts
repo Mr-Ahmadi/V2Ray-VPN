@@ -497,35 +497,54 @@ export class SystemProxyManager {
         try {
           console.log(`[SystemProxyManager] Disabling proxy for "${service}"...`);
 
-          // Fast cleanup based on what this app last enabled.
-          if (this.lastApplyMode === 'socks') {
+          // Always disable ALL proxy types regardless of lastApplyMode.
+          // This handles edge cases where a previous session or manual
+          // change left partial proxy config.
+          try {
             this.executeWithAuth(`networksetup -setsocksfirewallproxystate "${service}" off`);
-          } else if (this.lastApplyMode === 'pac') {
+          } catch (e) {
+            console.warn(`[SystemProxyManager]   ⚠ Could not disable SOCKS proxy for "${service}"`, e);
+          }
+          try {
+            this.executeWithAuth(`networksetup -setwebproxystate "${service}" off`);
+          } catch (e) {
+            console.warn(`[SystemProxyManager]   ⚠ Could not disable HTTP proxy for "${service}"`, e);
+          }
+          try {
+            this.executeWithAuth(`networksetup -setsecurewebproxystate "${service}" off`);
+          } catch (e) {
+            console.warn(`[SystemProxyManager]   ⚠ Could not disable HTTPS proxy for "${service}"`, e);
+          }
+          try {
             this.executeWithAuth(`networksetup -setautoproxystate "${service}" off`);
-          } else {
-            try {
-              this.executeWithAuth(`networksetup -setsocksfirewallproxystate "${service}" off`);
-            } catch (e) {
-              console.warn(`[SystemProxyManager]   ⚠ Could not disable SOCKS proxy for "${service}"`, e);
-            }
-            try {
-              this.executeWithAuth(`networksetup -setwebproxystate "${service}" off`);
-            } catch (e) {
-              console.warn(`[SystemProxyManager]   ⚠ Could not disable HTTP proxy for "${service}"`, e);
-            }
-            try {
-              this.executeWithAuth(`networksetup -setsecurewebproxystate "${service}" off`);
-            } catch (e) {
-              console.warn(`[SystemProxyManager]   ⚠ Could not disable HTTPS proxy for "${service}"`, e);
-            }
-            try {
-              this.executeWithAuth(`networksetup -setautoproxystate "${service}" off`);
-            } catch (e) {
-              // ignore
-            }
+          } catch (e) {
+            // ignore
           }
 
-          console.log(`[SystemProxyManager] ✓ Proxy disabled for "${service}"`);
+          // Clear the proxy server/port so they don't linger in System Settings.
+          // Disabling state alone leaves 127.0.0.1:10808 visible in the UI.
+          try {
+            this.executeWithAuth(`networksetup -setsocksfirewallproxy "${service}" "" ""`);
+          } catch (e) {
+            // ignore — clearing is best-effort
+          }
+          try {
+            this.executeWithAuth(`networksetup -setwebproxy "${service}" "" ""`);
+          } catch (e) {
+            // ignore
+          }
+          try {
+            this.executeWithAuth(`networksetup -setsecurewebproxy "${service}" "" ""`);
+          } catch (e) {
+            // ignore
+          }
+          try {
+            this.executeWithAuth(`networksetup -setautoproxyurl "${service}" ""`);
+          } catch (e) {
+            // ignore
+          }
+
+          console.log(`[SystemProxyManager] ✓ Proxy disabled and cleared for "${service}"`);
           successCount++;
         } catch (error) {
           console.warn(`[SystemProxyManager] ✗ Error disabling proxy for "${service}":`, error);

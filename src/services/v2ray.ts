@@ -288,7 +288,11 @@ export class V2RayService {
         const elapsed = Date.now() - cleanupStartTime;
         console.log(`[V2RayService] Proxy cleanup completed in ${elapsed}ms`);
       })();
-      this.proxyCleanupTask = task.finally(() => {
+      // Store the task directly so the .finally() guard can compare correctly.
+      // task.finally() returns a NEW promise — assigning that instead would
+      // make the guard always-false and the cache would never clear.
+      this.proxyCleanupTask = task;
+      task.finally(() => {
         if (this.proxyCleanupTask === task) {
           this.proxyCleanupTask = null;
         }
@@ -656,6 +660,14 @@ export class V2RayService {
   private async setupSystemProxyAsync(mode: 'full'): Promise<void> {
     const startTime = Date.now();
     try {
+      // Guard: if the user disconnected while this async task was pending
+      // (e.g. admin auth dialog delayed the call), bail out to avoid
+      // re-enabling the proxy after our own disconnect cleanup.
+      if (this.connectionStatus.state !== 'connected') {
+        console.log('[V2RayService] Skipping system proxy setup — connection no longer active');
+        return;
+      }
+
       console.log(`[V2RayService] Setting up system proxy (${mode} mode)...`);
       
       if (process.platform === 'darwin') {
@@ -665,6 +677,14 @@ export class V2RayService {
         await systemProxyManager.enableSystemProxy();
       }
       
+      // Re-check after the await — the user might have disconnected while
+      // enableSocksProxy/enableSystemProxy was in-flight.
+      if (this.connectionStatus.state !== 'connected') {
+        console.log('[V2RayService] Connection dropped during proxy setup; reverting...');
+        await systemProxyManager.disableSystemProxy().catch(() => {});
+        return;
+      }
+
       const elapsed = Date.now() - startTime;
       console.log(`[V2RayService] System proxy enabled successfully (took ${elapsed}ms)`);
     } catch (error) {
