@@ -53,15 +53,47 @@ export class UriImportService {
   }
 
   async importUris(input: string, options?: { subscriptionId?: string }): Promise<ImportUrisResult> {
+    const jsonServers = this.parseV2RayConfigJson(input);
+    if (jsonServers.length > 0) {
+      return this.importParsedServers(jsonServers, options);
+    }
+
     const uris = this.splitUriInput(input);
     if (uris.length === 0) {
       return {
         imported: [],
         skipped: [],
-        errors: [{ uri: '', error: 'No valid URIs found in input' }],
+        errors: [{ uri: '', error: 'No valid URIs or V2Ray config found in input' }],
       };
     }
 
+    const parsedServers: ParsedServerInput[] = [];
+    const uriErrors: Array<{ uri: string; error: string }> = [];
+
+    for (const uri of uris) {
+      try {
+        parsedServers.push(this.parseUri(uri));
+      } catch (error) {
+        uriErrors.push({
+          uri,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (parsedServers.length === 0) {
+      return { imported: [], skipped: [], errors: uriErrors };
+    }
+
+    const result = await this.importParsedServers(parsedServers, options);
+    result.errors.push(...uriErrors);
+    return result;
+  }
+
+  private async importParsedServers(
+    servers: ParsedServerInput[],
+    options?: { subscriptionId?: string }
+  ): Promise<ImportUrisResult> {
     const existingServers = await this.serverManager.listServers();
     const existingKeys = new Set(existingServers.map((server) => this.makeServerKey(server)));
 
@@ -69,13 +101,12 @@ export class UriImportService {
     const skipped: Array<{ uri: string; reason: string }> = [];
     const errors: Array<{ uri: string; error: string }> = [];
 
-    for (const uri of uris) {
+    for (const parsed of servers) {
       try {
-        const parsed = this.parseUri(uri);
         const candidateKey = this.makeParsedKey(parsed);
 
         if (existingKeys.has(candidateKey)) {
-          skipped.push({ uri, reason: 'Duplicate server' });
+          skipped.push({ uri: parsed.name, reason: 'Duplicate server' });
           continue;
         }
 
@@ -93,7 +124,7 @@ export class UriImportService {
         existingKeys.add(candidateKey);
       } catch (error) {
         errors.push({
-          uri,
+          uri: parsed.name,
           error: error instanceof Error ? error.message : String(error),
         });
       }
@@ -102,7 +133,232 @@ export class UriImportService {
     return { imported, skipped, errors };
   }
 
+  private parseV2RayConfigJson(input: string): ParsedServerInput[] {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(input);
+    } catch {
+      return [];
+    }
+
+    const skipProtocols = new Set(['freedom', 'blackhole', 'dns', 'dns-out']);
+    const results: ParsedServerInput[] = [];
+
+    // Handle array of V2Ray configs
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        if (item && typeof item === 'object' && Array.isArray(item.outbounds)) {
+          const proxyOutbound = item.outbounds.find(
+            (o: any) => o.protocol && !skipProtocols.has(o.protocol)
+          );
+          if (proxyOutbound) {
+            const server = this.parseOutboundToServer(proxyOutbound);
+            if (server) {
+              if (item.remarks) {
+                server.name = item.remarks;
+                server.remarks = item.remarks;
+              }
+              results.push(server);
+            }
+          }
+        }
+      }
+      return results;
+    }
+
+    // Handle single V2Ray config object
+    const outbounds = parsed.outbounds;
+    if (!Array.isArray(outbounds) || outbounds.length === 0) {
+      return [];
+    }
+
+    for (const outbound of outbounds) {
+      const protocol = String(outbound.protocol || '').toLowerCase();
+      if (!protocol || skipProtocols.has(protocol)) {
+        continue;
+      }
+
+      const server = this.parseOutboundToServer(outbound);
+      if (server) {
+        results.push(server);
+      }
+    }
+
+    return results;
+  }
+
+  private parseOutboundToServer(outbound: any): ParsedServerInput | null {
+    const protocol = String(outbound.protocol || '').toLowerCase();
+    const settings = outbound.settings || {};
+    const streamSettings = outbound.streamSettings || {};
+    const tag = outbound.tag || '';
+
+    switch (protocol) {
+      case 'vless':
+      case 'vmess': {
+        const vnext = settings.vnext;
+        if (!Array.isArray(vnext) || vnext.length === 0) return null;
+        const node = vnext[0];
+        if (!node.address || !node.port) return null;
+        const user = node.users?.[0];
+        if (!user?.id) return null;
+
+        const config: Record<string, any> = {
+          id: user.id,
+          encryption: user.encryption || 'none',
+          type: streamSettings.network || 'tcp',
+          security: streamSettings.security || 'none',
+          flow: user.flow || '',
+        };
+
+        if (protocol === 'vmess') {
+          config.alterId = Number(user.alterId ?? 0);
+          config.security = user.security || 'auto';
+          config.tls = streamSettings.security === 'tls' ? 'tls' : 'none';
+        }
+
+        this.extractStreamSettings(streamSettings, config);
+
+        const name = tag || `${node.address}:${node.port}`;
+        return {
+          protocol: protocol as 'vless' | 'vmess',
+          name,
+          address: node.address,
+          port: Number(node.port),
+          remarks: tag || '',
+          config,
+        };
+      }
+
+      case 'trojan': {
+        const servers = settings.servers;
+        if (!Array.isArray(servers) || servers.length === 0) return null;
+        const node = servers[0];
+        if (!node.address || !node.password) return null;
+
+        const config: Record<string, any> = {
+          password: node.password,
+          sni: streamSettings.tlsSettings?.serverName || node.address,
+          allowInsecure: streamSettings.tlsSettings?.allowInsecure === true,
+        };
+
+        const name = tag || `${node.address}:${node.port || 443}`;
+        return {
+          protocol: 'trojan',
+          name,
+          address: node.address,
+          port: Number(node.port || 443),
+          remarks: tag || '',
+          config,
+        };
+      }
+
+      case 'shadowsocks': {
+        const address = settings.address || settings.servers?.[0]?.address || '';
+        const port = settings.port || settings.servers?.[0]?.port || 443;
+        const method = settings.method;
+        const password = settings.password;
+        if (!address || !method || !password) return null;
+
+        const config: Record<string, any> = {
+          method,
+          password,
+        };
+
+        const name = tag || `${address}:${port}`;
+        return {
+          protocol: 'shadowsocks',
+          name,
+          address,
+          port: Number(port),
+          remarks: tag || '',
+          config,
+        };
+      }
+
+      default:
+        return null;
+    }
+  }
+
+  private extractStreamSettings(streamSettings: any, config: Record<string, any>): void {
+    if (!streamSettings) return;
+
+    config.type = streamSettings.network || config.type || 'tcp';
+
+    const security = streamSettings.security || 'none';
+    if (security !== 'none') {
+      config.security = security;
+    }
+
+    const tlsSettings = streamSettings.tlsSettings;
+    if (tlsSettings) {
+      if (tlsSettings.serverName) config.sni = tlsSettings.serverName;
+      if (tlsSettings.allowInsecure !== undefined) config.allowInsecure = tlsSettings.allowInsecure;
+      if (tlsSettings.fingerprint) config.fp = tlsSettings.fingerprint;
+      if (tlsSettings.alpn) config.alpn = Array.isArray(tlsSettings.alpn) ? tlsSettings.alpn.join(',') : tlsSettings.alpn;
+    }
+
+    const realitySettings = streamSettings.realitySettings;
+    if (realitySettings) {
+      if (realitySettings.serverName) config.sni = realitySettings.serverName;
+      if (realitySettings.fingerprint) config.fp = realitySettings.fingerprint;
+      if (realitySettings.publicKey) config.publicKey = realitySettings.publicKey;
+      if (realitySettings.shortId) config.shortId = realitySettings.shortId;
+    }
+
+    const wsSettings = streamSettings.wsSettings;
+    if (wsSettings) {
+      if (wsSettings.path) config.path = wsSettings.path;
+      if (wsSettings.headers?.Host) config.host = wsSettings.headers.Host;
+    }
+
+    const grpcSettings = streamSettings.grpcSettings;
+    if (grpcSettings) {
+      if (grpcSettings.serviceName) config.serviceName = grpcSettings.serviceName;
+    }
+
+    const httpSettings = streamSettings.httpSettings;
+    if (httpSettings) {
+      if (httpSettings.path) config.path = httpSettings.path;
+      if (httpSettings.host) config.host = Array.isArray(httpSettings.host) ? httpSettings.host[0] : httpSettings.host;
+    }
+
+    const xhttpSettings = streamSettings.xhttpSettings;
+    if (xhttpSettings) {
+      if (xhttpSettings.path) config.path = xhttpSettings.path;
+      if (xhttpSettings.mode) config.mode = xhttpSettings.mode;
+      if (xhttpSettings.noGRPCHeader !== undefined) config.noGRPCHeader = xhttpSettings.noGRPCHeader;
+      if (xhttpSettings.xmux) config.xmux = xhttpSettings.xmux;
+      if (xhttpSettings.downloadSettings) {
+        config.downloadSettings = xhttpSettings.downloadSettings;
+        const dlXhttp = xhttpSettings.downloadSettings.xhttpSettings;
+        if (dlXhttp?.path) config.path = dlXhttp.path;
+        const dlTls = xhttpSettings.downloadSettings.tlsSettings;
+        if (dlTls) {
+          if (dlTls.serverName) config.sni = dlTls.serverName;
+          if (dlTls.fingerprint) config.fp = dlTls.fingerprint;
+          if (dlTls.alpn) config.alpn = Array.isArray(dlTls.alpn) ? dlTls.alpn.join(',') : dlTls.alpn;
+          if (dlTls.allowInsecure !== undefined) config.allowInsecure = dlTls.allowInsecure;
+        }
+      }
+    }
+
+    const tcpSettings = streamSettings.tcpSettings;
+    if (tcpSettings?.header?.type) {
+      config.headerType = tcpSettings.header.type;
+    }
+  }
+
   previewUris(input: string): PreviewUriItem[] {
+    const jsonServers = this.parseV2RayConfigJson(input);
+    if (jsonServers.length > 0) {
+      return jsonServers.map((s) => ({
+        uri: s.name,
+        parsed: s,
+      }));
+    }
+
     const uris = this.splitUriInput(input);
     return uris.map((uri) => {
       try {

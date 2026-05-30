@@ -26,14 +26,16 @@ echo "  Architecture: $ARCH"
 echo ""
 
 # Determine download URL based on OS and architecture
+CORE_VERSION="v26.3.27"
+CORE_REPO="XTLS/Xray-core"
 case "$OS" in
   Darwin)
     echo "Detected: macOS"
     if [ "$ARCH" == "arm64" ]; then
-      V2RAY_URL="https://github.com/v2fly/v2ray-core/releases/download/v5.44.1/v2ray-macos-arm64-v8a.zip"
+      V2RAY_URL="https://github.com/${CORE_REPO}/releases/download/${CORE_VERSION}/Xray-macos-arm64-v8a.zip"
       echo "Platform: Apple Silicon (ARM64)"
     elif [ "$ARCH" == "x86_64" ]; then
-      V2RAY_URL="https://github.com/v2fly/v2ray-core/releases/download/v5.44.1/v2ray-macos-64.zip"
+      V2RAY_URL="https://github.com/${CORE_REPO}/releases/download/${CORE_VERSION}/Xray-macos-64.zip"
       echo "Platform: Intel (x86_64)"
     else
       echo -e "${RED}Error: Unsupported architecture: $ARCH${NC}"
@@ -43,10 +45,10 @@ case "$OS" in
   Linux)
     echo "Detected: Linux"
     if [ "$ARCH" == "x86_64" ]; then
-      V2RAY_URL="https://github.com/v2fly/v2ray-core/releases/download/v5.44.1/v2ray-linux-64.zip"
+      V2RAY_URL="https://github.com/${CORE_REPO}/releases/download/${CORE_VERSION}/Xray-linux-64.zip"
       echo "Platform: Intel (x86_64)"
     elif [ "$ARCH" == "aarch64" ]; then
-      V2RAY_URL="https://github.com/v2fly/v2ray-core/releases/download/v5.44.1/v2ray-linux-arm64-v8a.zip"
+      V2RAY_URL="https://github.com/${CORE_REPO}/releases/download/${CORE_VERSION}/Xray-linux-arm64-v8a.zip"
       echo "Platform: ARM64"
     else
       echo -e "${RED}Error: Unsupported architecture: $ARCH${NC}"
@@ -56,7 +58,7 @@ case "$OS" in
   *)
     echo -e "${RED}Error: Unsupported OS: $OS${NC}"
     echo "This setup script only supports macOS and Linux."
-    echo "For Windows, please download V2Ray from https://github.com/v2fly/v2ray-core/releases"
+    echo "For Windows, please download Xray-core from https://github.com/XTLS/Xray-core/releases"
     exit 1
     ;;
 esac
@@ -197,8 +199,8 @@ echo ""
 echo "🎉 Setup complete!"
 echo ""
 echo "Next steps:"
-echo "1. Download V2Ray Core from: https://github.com/v2fly/v2ray-core/releases"
-echo "2. Extract and place 'v2ray' binary in the 'v2ray-core' directory"
+echo "1. Download Xray-core from: https://github.com/XTLS/Xray-core/releases"
+echo "2. Extract and place 'xray' binary in the 'v2ray-core' directory as 'v2ray'"
 echo "3. Make it executable: chmod +x v2ray-core/v2ray"
 echo "4. Run: npm run dev"
 echo ""

@@ -565,7 +565,7 @@ const createMenu = () => {
     {
       label: 'V2Ray Core Releases',
       click: async () => {
-        await shell.openExternal('https://github.com/v2fly/v2ray-core/releases');
+        await shell.openExternal('https://github.com/XTLS/Xray-core/releases');
       },
     },
   ];

@@ -364,7 +364,7 @@ export class V2RayService {
       console.warn('[V2RayService] V2Ray core not found at:', this.v2rayCorePath);
       console.log('[V2RayService] To download V2Ray core:');
       console.log('[V2RayService]   1. Run: chmod +x setup.sh && ./setup.sh');
-      console.log('[V2RayService]   Or manually download from: https://github.com/v2fly/v2ray-core/releases');
+      console.log('[V2RayService]   Or manually download from: https://github.com/XTLS/Xray-core/releases');
     }
   }
 
@@ -1456,7 +1456,14 @@ export class V2RayService {
       builder.addRules(advancedRules);
     }
 
-    // 6.5 Log app-based policy note
+    // 6.5 Catch-all: route remaining traffic to proxy
+    builder.addRule({
+      type: 'field',
+      port: '0-65535',
+      outboundTag: 'proxy',
+    });
+
+    // 6.6 Log app-based policy note
     if (appRoutingRules && appRoutingRules.length > 0) {
       console.log('[V2RayService] Note: App routing handled via launcher/environment, not V2Ray config rules.');
     }
@@ -1490,13 +1497,15 @@ export class V2RayService {
             allowInsecure: globalAllowInsecure
               || this.normalizeBooleanFlag(server.config.allowInsecure)
               || this.normalizeBooleanFlag(server.config.insecure),
-            fingerprint: 'chrome',
-            alpn: ['h2', 'http/1.1'],
+            fingerprint: server.config.fp || 'chrome',
+            alpn: server.config.alpn
+              ? (Array.isArray(server.config.alpn) ? server.config.alpn : server.config.alpn.split(','))
+              : ['h2', 'http/1.1'],
           };
         } else if (security === 'reality') {
           streamSettings.realitySettings = {
             serverName: server.config.sni || server.config.host || server.address,
-            fingerprint: 'chrome',
+            fingerprint: server.config.fp || 'chrome',
             publicKey: server.config.publicKey || '',
             shortId: server.config.shortId || '',
           };
@@ -1524,6 +1533,22 @@ export class V2RayService {
               type: tcpHeaderType,
             },
           };
+        } else if (network === 'xhttp' || network === 'splithttp') {
+          streamSettings.xhttpSettings = {
+            path: server.config.path || '/',
+          };
+          if (server.config.mode) {
+            streamSettings.xhttpSettings.mode = server.config.mode;
+          }
+          if (server.config.noGRPCHeader !== undefined) {
+            streamSettings.xhttpSettings.noGRPCHeader = server.config.noGRPCHeader;
+          }
+          if (server.config.xmux) {
+            streamSettings.xhttpSettings.xmux = server.config.xmux;
+          }
+          if (server.config.downloadSettings) {
+            streamSettings.xhttpSettings.downloadSettings = server.config.downloadSettings;
+          }
         }
 
         const outbound: any = {
@@ -1551,7 +1576,7 @@ export class V2RayService {
 
         // Mux is optional and disabled by default for stability (notably Telegram).
         // Mux can be enabled explicitly via settings.enableMux=true.
-        if (muxEnabled && !server.config.flow && network !== 'ws') {
+        if (muxEnabled && !server.config.flow && network !== 'ws' && network !== 'xhttp' && network !== 'splithttp') {
           outbound.mux = {
             enabled: true,
             concurrency: 8,
@@ -1590,7 +1615,10 @@ export class V2RayService {
           streamSettings.tlsSettings = {
             serverName: server.config.sni || server.config.host || server.address,
             allowInsecure: globalAllowInsecure || this.normalizeBooleanFlag(server.config.allowInsecure),
-            fingerprint: 'chrome',
+            fingerprint: server.config.fp || 'chrome',
+            alpn: server.config.alpn
+              ? (Array.isArray(server.config.alpn) ? server.config.alpn : server.config.alpn.split(','))
+              : ['h2', 'http/1.1'],
           };
         }
 
@@ -1616,6 +1644,22 @@ export class V2RayService {
               type: tcpHeaderType,
             },
           };
+        } else if (network === 'xhttp' || network === 'splithttp') {
+          streamSettings.xhttpSettings = {
+            path: server.config.path || '/',
+          };
+          if (server.config.mode) {
+            streamSettings.xhttpSettings.mode = server.config.mode;
+          }
+          if (server.config.noGRPCHeader !== undefined) {
+            streamSettings.xhttpSettings.noGRPCHeader = server.config.noGRPCHeader;
+          }
+          if (server.config.xmux) {
+            streamSettings.xhttpSettings.xmux = server.config.xmux;
+          }
+          if (server.config.downloadSettings) {
+            streamSettings.xhttpSettings.downloadSettings = server.config.downloadSettings;
+          }
         }
 
         const outbound: any = {
@@ -1638,7 +1682,7 @@ export class V2RayService {
           },
           streamSettings,
         };
-        if (muxEnabled) {
+        if (muxEnabled && network !== 'xhttp' && network !== 'splithttp') {
           outbound.mux = {
             enabled: true,
             concurrency: 8,
