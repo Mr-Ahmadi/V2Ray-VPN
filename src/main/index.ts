@@ -1069,6 +1069,12 @@ const setupIPCHandlers = () => {
     try {
       if (!v2rayService) throw new Error('V2Ray service not initialized');
       const id = await v2rayService.getRoutingManager().addRule(rule);
+      const status = v2rayService.getStatus();
+      const currentServerId = status.currentServer?.id;
+      if (status.connected && currentServerId) {
+        console.log('[Main] Routing rule added while connected; reloading active connection to apply change');
+        await v2rayService.connect(currentServerId);
+      }
       return { success: true, data: { id } };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -1079,6 +1085,12 @@ const setupIPCHandlers = () => {
     try {
       if (!v2rayService) throw new Error('V2Ray service not initialized');
       await v2rayService.getRoutingManager().removeRule(ruleId);
+      const status = v2rayService.getStatus();
+      const currentServerId = status.currentServer?.id;
+      if (status.connected && currentServerId) {
+        console.log('[Main] Routing rule removed while connected; reloading active connection to apply change');
+        await v2rayService.connect(currentServerId);
+      }
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -1102,8 +1114,12 @@ const setupIPCHandlers = () => {
       const previousSettings = await v2rayService.getSettings();
       await v2rayService.saveSettings(settings);
 
-      const dnsRelatedKeys = ['dnsProvider', 'primaryDns', 'secondaryDns', 'ipv6Disable'];
-      const dnsSettingsChanged = dnsRelatedKeys.some((key) => {
+      const reconnectRelatedKeys = [
+        'dnsProvider', 'primaryDns', 'secondaryDns', 'ipv6Disable',
+        'proxyMode', 'routingMode', 'blockAds', 'killSwitch',
+        'enableMux', 'reconnectOnDisconnect',
+      ];
+      const settingsChanged = reconnectRelatedKeys.some((key) => {
         const before = previousSettings?.[key];
         const after = settings?.[key];
         return JSON.stringify(before ?? null) !== JSON.stringify(after ?? null);
@@ -1112,8 +1128,8 @@ const setupIPCHandlers = () => {
       const status = v2rayService.getStatus();
       const currentServerId = status.currentServer?.id;
 
-      if (dnsSettingsChanged && status.connected && currentServerId) {
-        console.log('[Main] DNS settings changed while connected; reloading active connection to apply DNS');
+      if (settingsChanged && status.connected && currentServerId) {
+        console.log('[Main] Settings changed while connected; reloading active connection to apply changes');
         await v2rayService.connect(currentServerId);
         return { success: true, data: { reappliedConnection: true } };
       }
