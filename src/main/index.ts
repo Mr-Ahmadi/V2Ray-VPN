@@ -1299,6 +1299,16 @@ const setupIPCHandlers = () => {
     }
   });
 
+  ipcMain.handle('bridge:installCaCert', async () => {
+    try {
+      if (!bridgeService) throw new Error('Shade service not initialized');
+      const ok = await bridgeService.installCaCert();
+      return { success: ok };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
   ipcMain.handle('bridge:setupRuntime', async (_: any, opts?: { includeOptional?: boolean }) => {
     try {
       if (!bridgeService) throw new Error('Shade service not initialized');

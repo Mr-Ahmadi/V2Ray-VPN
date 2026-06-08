@@ -122,33 +122,9 @@ func socks5Relay(client net.Conn, host string, port int, mode ProxyMode) {
 		return
 	}
 
-	if mode.Direct {
-		remote, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprintf("%d", port)), 15*time.Second)
-		if err != nil {
-			DefaultLog.Error("SOCKS5", "Direct dial fail: %v", err)
-			return
-		}
-		defer remote.Close()
-		go io.Copy(remote, client)
-		io.Copy(client, remote)
-		return
-	}
-
-	if mode.Fronter != nil {
-		targetURL := fmt.Sprintf("https://%s:%d/", host, port)
-		_, err := mode.Fronter.relay("CONNECT", targetURL, nil, nil)
-		if err != nil {
-			DefaultLog.Error("SOCKS5", "Relay CONNECT fail: %v", err)
-		}
-		return
-	}
-
-	DefaultLog.Error("SOCKS5", "No handler for %s:%d", host, port)
-}
-
-func socks5DirectPipe(client net.Conn, host string, port int) {
 	remote, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprintf("%d", port)), 15*time.Second)
 	if err != nil {
+		DefaultLog.Error("SOCKS5", "Direct dial fail: %v", err)
 		return
 	}
 	defer remote.Close()
@@ -156,6 +132,4 @@ func socks5DirectPipe(client net.Conn, host string, port int) {
 	io.Copy(client, remote)
 }
 
-var ProxyIncrDomains = []string{}
-var ProxyIncrHost = ""
-var ProxyIncrPort = 0
+

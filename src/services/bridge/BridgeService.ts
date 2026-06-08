@@ -1,4 +1,4 @@
-import { ChildProcess, spawn } from 'child_process';
+import { ChildProcess, execSync, spawn } from 'child_process';
 import fs from 'fs';
 import net from 'net';
 import os from 'os';
@@ -54,6 +54,9 @@ export class BridgeService {
     }
 
     await this.stop();
+
+    await this.ensureCaFiles().catch(() => undefined);
+    await this.installCaCert().catch(() => undefined);
 
     const runtime = await this.withAvailablePorts(this.config);
     const binaryPath = this.resolveBridgeBinary();
@@ -187,6 +190,57 @@ export class BridgeService {
       });
       proc.on('error', (error) => reject(error));
     });
+  }
+
+  async installCaCert(): Promise<boolean> {
+    const { caCertFile } = this.resolveCaPaths();
+    if (!fs.existsSync(caCertFile)) {
+      debugLogger.warn('BridgeService', 'CA cert not found, cannot install');
+      return false;
+    }
+
+    if (process.platform === 'darwin') {
+      try {
+        execSync(
+          `security add-trusted-cert -d -p ssl -p smime -p codeSign -p basic -r trustRoot "${caCertFile}"`,
+          { timeout: 15000, stdio: 'pipe' },
+        );
+        debugLogger.info('BridgeService', 'CA certificate installed to login keychain');
+        return true;
+      } catch (error) {
+        debugLogger.warn('BridgeService', 'Failed to install CA cert to login keychain', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return false;
+      }
+    }
+
+    if (process.platform === 'linux') {
+      try {
+        execSync(
+          `cp "${caCertFile}" /usr/local/share/ca-certificates/v2ray-vpn-ca.crt && update-ca-certificates`,
+          { timeout: 15000, stdio: 'pipe' },
+        );
+        debugLogger.info('BridgeService', 'CA certificate installed');
+        return true;
+      } catch (error) {
+        debugLogger.warn('BridgeService', 'Failed to install CA cert');
+        return false;
+      }
+    }
+
+    if (process.platform === 'win32') {
+      try {
+        execSync(`certutil -addstore -user Root "${caCertFile}"`, { timeout: 15000, stdio: 'pipe' });
+        debugLogger.info('BridgeService', 'CA certificate installed to user root store');
+        return true;
+      } catch (error) {
+        debugLogger.warn('BridgeService', 'Failed to install CA cert');
+        return false;
+      }
+    }
+
+    return false;
   }
 
   private resolveCaPaths(): { caDir: string; caCertFile: string; caKeyFile: string } {

@@ -82,6 +82,7 @@ const electronAPI = {
     getRuntimeDiagnostics: () => ipcRenderer.invoke('bridge:getRuntimeDiagnostics'),
     setupRuntime: (opts?: { includeOptional?: boolean }) => ipcRenderer.invoke('bridge:setupRuntime', opts),
     ensureCaFiles: () => ipcRenderer.invoke('bridge:ensureCaFiles'),
+    installCaCert: () => ipcRenderer.invoke('bridge:installCaCert'),
   },
   
   // Window controls for custom title bar

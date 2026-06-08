@@ -65,6 +65,7 @@ declare global {
         getRuntimeDiagnostics: () => Promise<any>;
         setupRuntime: (opts?: { includeOptional?: boolean }) => Promise<any>;
         ensureCaFiles: () => Promise<any>;
+        installCaCert: () => Promise<any>;
       };
       window: {
         minimize: () => Promise<{ success: boolean; error?: string }>;

@@ -89,6 +89,7 @@ export default function BridgePanel() {
   const [templateCode, setTemplateCode] = useState('');
   const [previewAuthKey, setPreviewAuthKey] = useState('');
   const [copyDone, setCopyDone] = useState(false);
+  const [caInstalling, setCaInstalling] = useState(false);
   const [runtime, setRuntime] = useState<RuntimeDiagnostics | null>(null);
 
   const activeScripts = useMemo(
@@ -291,6 +292,23 @@ export default function BridgePanel() {
       setError(err?.message || 'Scan failed');
     } finally {
       setScanBusy(false);
+    }
+  };
+
+  const handleInstallCa = async () => {
+    try {
+      setCaInstalling(true);
+      setError('');
+      const res = await window.electronAPI.bridge.installCaCert();
+      if (res?.success) {
+        await loadRuntimeDiagnostics();
+      } else {
+        setError(res?.error || 'Failed to install CA certificate');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to install CA certificate');
+    } finally {
+      setCaInstalling(false);
     }
   };
 
@@ -573,6 +591,16 @@ export default function BridgePanel() {
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
               CA Key: {runtime?.caKeyFile || 'Not resolved yet'} {runtime?.caKeyExists ? '(ok)' : '(missing)'}
             </Typography>
+            <Button
+              size="small"
+              variant="outlined"
+              sx={{ mt: 0.5 }}
+              onClick={handleInstallCa}
+              disabled={caInstalling}
+            >
+              {caInstalling ? <CircularProgress size={12} sx={{ mr: 0.5 }} /> : null}
+              Install CA Certificate (Trust for HTTPS)
+            </Button>
           </Box>
         </Stack>
       </Container>
