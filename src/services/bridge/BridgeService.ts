@@ -191,7 +191,7 @@ export class BridgeService {
 
   private resolveCaPaths(): { caDir: string; caCertFile: string; caKeyFile: string } {
     const baseDir = process.env.BRIDGE_USER_DATA_PATH || path.join(os.homedir(), '.v2ray-vpn');
-    const caDir = process.env.BRIDGE_CA_DIR || path.join(baseDir, 'bridge', 'ca');
+    const caDir = process.env.BRIDGE_CA_DIR || path.join(baseDir, 'ca');
     const caCertFile = this.config?.caCertFile || process.env.BRIDGE_CA_CERT_FILE || path.join(caDir, 'ca.crt');
     const caKeyFile = this.config?.caKeyFile || process.env.BRIDGE_CA_KEY_FILE || path.join(caDir, 'ca.key');
     return { caDir, caCertFile, caKeyFile };
@@ -324,7 +324,7 @@ export class BridgeService {
 
   private spawnCoreProcess(command: string, args: string[]): void {
     const baseDir = process.env.BRIDGE_USER_DATA_PATH || path.join(os.homedir(), '.v2ray-vpn');
-    const caDir = path.join(baseDir, 'bridge', 'ca');
+    const caDir = path.join(baseDir, 'ca');
     fs.mkdirSync(caDir, { recursive: true });
 
     const envOverrides: Record<string, string> = {};

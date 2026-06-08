@@ -801,7 +801,27 @@ export class AppRoutingService {
               // continue
             }
           }
-          await new Promise(resolve => setTimeout(resolve, 800));
+          // Give the app up to 5s to shut down gracefully after SIGTERM.
+          // Chrome in particular needs time to flush state and release its
+          // singleton lock; a fast SIGKILL leads to user-data corruption and
+          // SIGTRAP assertions on next launch.
+          const graceMs = 5000;
+          const deadline = Date.now() + graceMs;
+          while (Date.now() < deadline) {
+            let allExited = true;
+            for (const pid of pids) {
+              try {
+                process.kill(pid, 0);
+                allExited = false;
+              } catch {
+                // process already exited
+              }
+            }
+            if (allExited) break;
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+
+          // Force-kill any remaining processes that ignored SIGTERM.
           for (const pid of pids) {
             try {
               process.kill(pid, 0);
@@ -819,6 +839,12 @@ export class AppRoutingService {
           } catch {
             // continue
           }
+        }
+
+        // On macOS, after killing Chrome, wait briefly for filesystem locks
+        // (e.g. Chrome's SingletonLock) to be released before returning.
+        if (process.platform === 'darwin') {
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
         return;
       }
