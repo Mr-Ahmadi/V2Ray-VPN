@@ -63,6 +63,15 @@ export class AppRoutingService {
     'arc',
   ];
   private static readonly FIREFOX_APP_MARKERS = ['firefox', 'librewolf', 'waterfox'];
+  private static readonly CHROMIUM_USER_DATA_DIRS: [marker: string, relativeDir: string][] = [
+    ['chrome', 'Google/Chrome'],
+    ['chromium', 'Chromium'],
+    ['edge', 'Microsoft Edge'],
+    ['brave', 'BraveSoftware/Brave-Browser'],
+    ['opera', 'com.operasoftware.Opera'],
+    ['vivaldi', 'Vivaldi'],
+    ['arc', 'Arc/User Data'],
+  ];
 
   private isExecutableFile(fsModule: any, filePath: string): boolean {
     try {
@@ -640,20 +649,11 @@ export class AppRoutingService {
         return;
       }
 
-      // macOS .app bundles: run executable directly so env vars are inherited.
+      // macOS .app bundles: resolve the executable and spawn it directly so
+      // command-line flags (--proxy-server=direct:// etc.) reach Chrome's argv.
+      // LaunchServices (`open`) does pass --args, but Chrome 148 exits when
+      // opened through the LaunchServices path with proxy flags.
       if (process.platform === 'darwin' && appPath.endsWith('.app')) {
-        const executablePath = this.resolveMacBundleExecutable(appPath);
-        if (executablePath) {
-          debugLogger.info('AppRoutingService', 'Launching bundle executable directly in direct mode', {
-            executablePath,
-            directArgs: browserDirectArgs,
-          });
-          const child = spawn(executablePath, browserDirectArgs, { env, detached: true, stdio: 'ignore' });
-          child.unref();
-          return;
-        }
-
-        // Fallback: clear launchctl env vars so apps launched via LaunchServices go direct.
         try {
           const { execSync: execSyncFn } = require('child_process');
           execSyncFn('launchctl unsetenv http_proxy 2>/dev/null || true', { stdio: 'ignore' });
@@ -667,13 +667,29 @@ export class AppRoutingService {
           });
         }
 
+        const executablePath = this.resolveMacBundleExecutable(appPath);
+        if (executablePath) {
+          const child = spawn(executablePath, browserDirectArgs, {
+            env,
+            detached: true,
+            stdio: 'ignore',
+          });
+          child.unref();
+          debugLogger.info('AppRoutingService', 'Launched bypass via direct executable spawn', {
+            executablePath,
+            browserDirectArgs,
+          });
+          return;
+        }
+
+        // Fallback: launch via LaunchServices if we can't resolve the executable
         const openArgs = ['-a', appPath];
         if (browserDirectArgs.length > 0) {
           openArgs.push('--args', ...browserDirectArgs);
         }
         const child = spawn('open', openArgs, { detached: true, stdio: 'ignore' });
         child.unref();
-        debugLogger.info('AppRoutingService', 'Launched using open() in direct mode', { openArgs });
+        debugLogger.info('AppRoutingService', 'Launched bypass via open() fallback', { openArgs });
         return;
       }
 
@@ -799,6 +815,24 @@ export class AppRoutingService {
     }
   }
 
+  private removeChromiumSingletonLock(appName: string): void {
+    const lowerName = appName.toLowerCase();
+    const home = os.homedir();
+    const fs = require('fs');
+    for (const [marker, relativeDir] of AppRoutingService.CHROMIUM_USER_DATA_DIRS) {
+      if (lowerName.includes(marker)) {
+        const baseDir = path.join(home, 'Library', 'Application Support', relativeDir);
+        for (const file of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+          try {
+            fs.unlinkSync(path.join(baseDir, file));
+          } catch {
+            // file doesn't exist or can't be deleted
+          }
+        }
+      }
+    }
+  }
+
   async stopApp(appPath: string): Promise<void> {
     try {
       if (process.platform === 'darwin') {
@@ -811,7 +845,27 @@ export class AppRoutingService {
               // continue
             }
           }
-          await new Promise(resolve => setTimeout(resolve, 800));
+          // Give the app up to 5s to shut down gracefully after SIGTERM.
+          // Chrome in particular needs time to flush state and release its
+          // singleton lock; a fast SIGKILL leads to user-data corruption and
+          // SIGTRAP assertions on next launch.
+          const graceMs = 5000;
+          const deadline = Date.now() + graceMs;
+          while (Date.now() < deadline) {
+            let allExited = true;
+            for (const pid of pids) {
+              try {
+                process.kill(pid, 0);
+                allExited = false;
+              } catch {
+                // process already exited
+              }
+            }
+            if (allExited) break;
+            await new Promise(resolve => setTimeout(resolve, 200));
+          }
+
+          // Force-kill any remaining processes that ignored SIGTERM.
           for (const pid of pids) {
             try {
               process.kill(pid, 0);
@@ -829,6 +883,28 @@ export class AppRoutingService {
           } catch {
             // continue
           }
+        }
+
+        // Chromium apps (Chrome, Edge, Brave, etc.) keep helper processes alive
+        // (e.g. "Google Chrome Helper (GPU)") that hold the app's SingletonLock.
+        // If they survive, the relaunched instance detects a living lock holder
+        // and exits immediately.  Kill them too.
+        const appName = path.basename(appPath).replace(/\.app$/i, '');
+        if (AppRoutingService.CHROMIUM_APP_MARKERS.some(name => appName.toLowerCase().includes(name))) {
+          try {
+            execSync(`pkill -f "${appName.replace(/"/g, '\\"')} Helper" 2>/dev/null || true`, { stdio: 'ignore' });
+          } catch {
+            // continue
+          }
+        }
+
+        // Remove stale SingletonLock/SingletonSocket/SingletonCookie files so a
+        // lingering XPC service or respawned helper can't block the relaunch.
+        this.removeChromiumSingletonLock(appName);
+
+        // Give the filesystem a moment to settle before returning.
+        if (process.platform === 'darwin') {
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
         return;
       }

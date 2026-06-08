@@ -1292,7 +1292,7 @@ const setupIPCHandlers = () => {
     try {
       if (!bridgeService) throw new Error('Shade service not initialized');
       process.env.BRIDGE_USER_DATA_PATH = app.getPath('userData');
-      const data = bridgeService.ensureCaFiles();
+      const data = await bridgeService.ensureCaFiles();
       return { success: true, data };
     } catch (error: any) {
       return { success: false, error: error.message };

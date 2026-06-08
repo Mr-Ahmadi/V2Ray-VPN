@@ -17,9 +17,7 @@ Desktop V2Ray client (Electron + React).
 
 - Node.js 18+
 - npm 9+
-- Python 3.10+ (for Bridge runtime)
 - `v2ray-core/` (setup.sh)
-- `bridge-core/` (python code avilable)
 
 ## Run locally
 
@@ -43,13 +41,12 @@ npm run dist
 - UI to use [MasterHttpRelayVPN](https://github.com/masterking32/MasterHttpRelayVPN)
 
 1. Open **Bridge** tab in the app.
-2. Click **Setup Python + Libs** once.
-3. Add one or more **Script ID / Auth Key** pairs.
-4. Click **Set AUTH_KEY** and **Copy** to copy `Code.gs`.
-5. Deploy your Google Apps Script web app.
-6. Paste Script ID/Auth Key back in Bridge profile.
-7. (Optional) run **Scan Fastest IPs**.
-8. Click **Configure + Start**.
+2. Add one or more **Script ID / Auth Key** pairs.
+3. Click **Set AUTH_KEY** and **Copy** to copy `Code.gs`.
+4. Deploy your Google Apps Script web app.
+5. Paste Script ID/Auth Key back in Bridge profile.
+6. (Optional) run **Scan Fastest IPs**.
+7. Click **Configure + Start**.
 
 Notes:
 - Bridge CA files are auto-managed in user data (`~/.v2ray-vpn/bridge/ca` by default).
