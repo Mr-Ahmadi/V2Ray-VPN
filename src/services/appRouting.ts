@@ -640,20 +640,10 @@ export class AppRoutingService {
         return;
       }
 
-      // macOS .app bundles: run executable directly so env vars are inherited.
+      // macOS .app bundles: use LaunchServices (`open`) for proper macOS process
+      // lifecycle and security handling.  Direct spawn of bundle executables can
+      // trigger assertion failures in apps like Chrome.
       if (process.platform === 'darwin' && appPath.endsWith('.app')) {
-        const executablePath = this.resolveMacBundleExecutable(appPath);
-        if (executablePath) {
-          debugLogger.info('AppRoutingService', 'Launching bundle executable directly in direct mode', {
-            executablePath,
-            directArgs: browserDirectArgs,
-          });
-          const child = spawn(executablePath, browserDirectArgs, { env, detached: true, stdio: 'ignore' });
-          child.unref();
-          return;
-        }
-
-        // Fallback: clear launchctl env vars so apps launched via LaunchServices go direct.
         try {
           const { execSync: execSyncFn } = require('child_process');
           execSyncFn('launchctl unsetenv http_proxy 2>/dev/null || true', { stdio: 'ignore' });
