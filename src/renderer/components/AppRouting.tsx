@@ -250,6 +250,7 @@ export default function AppRouting() {
 
 
   const applyPolicyNow = async (app: App, policy: AppRoutePolicy) => {
+    await loadDiagnostics();
     if (!diagnostics?.connected) {
       setNotice({ severity: 'info', message: 'VPN is disconnected. Connect first to apply now.' });
       return;
