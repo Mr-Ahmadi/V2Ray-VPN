@@ -1,4 +1,4 @@
-import { ChildProcess, spawn, spawnSync } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
 import net from 'net';
 import os from 'os';
@@ -9,40 +9,20 @@ import { ProbeResult, ShadeConfig, ShadeStartResult, ShadeStatus } from './types
 import systemProxyManager from '../systemProxyManager.js';
 import debugLogger from '../debugLogger.js';
 
-type PythonRunner = {
-  command: string;
-  prefixArgs: string[];
-};
-
-type ShadeDependencyProbe = {
-  python: string;
-  executable: string;
-  missingRequired: string[];
-  missingOptional: string[];
-};
-
 export type ShadeRuntimeDiagnostics = {
   ready: boolean;
-  pythonCommand?: string;
-  pythonVersion?: string;
-  pythonExecutable?: string;
-  coreEntry?: string;
+  binaryPath?: string;
   caDir?: string;
   caCertFile?: string;
   caKeyFile?: string;
   caCertExists?: boolean;
   caKeyExists?: boolean;
-  missingRequired: string[];
-  missingOptional: string[];
   issues: string[];
 };
 
 export type ShadeRuntimeSetupResult = {
   ok: boolean;
-  pythonCommand?: string;
-  pythonVersion?: string;
-  installed: string[];
-  skipped: string[];
+  binaryPath?: string;
   message: string;
 };
 
@@ -76,14 +56,12 @@ export class BridgeService {
     await this.stop();
 
     const runtime = await this.withAvailablePorts(this.config);
-    const coreEntry = this.resolveCoreEntryPath();
-    const runner = this.resolvePythonRunner();
-    this.verifyRuntimeDependencies(runner);
+    const binaryPath = this.resolveBridgeBinary();
     const configPath = this.writeCoreConfig(runtime);
-    const args = [...runner.prefixArgs, coreEntry, '-c', configPath];
+    const args = ['-c', configPath];
 
     try {
-      this.spawnCoreProcess(runner.command, args);
+      this.spawnCoreProcess(binaryPath, args);
       await this.waitForCoreListeners(runtime);
 
       if (runtime.applySystemProxy) {
@@ -155,90 +133,60 @@ export class BridgeService {
 
   getRuntimeDiagnostics(): ShadeRuntimeDiagnostics {
     const issues: string[] = [];
-    const missingRequired: string[] = [];
-    const missingOptional: string[] = [];
-    let pythonCommand: string | undefined;
-    let pythonVersion: string | undefined;
-    let pythonExecutable: string | undefined;
-    let coreEntry: string | undefined;
+    let binaryPath: string | undefined;
     const { caDir, caCertFile, caKeyFile } = this.resolveCaPaths();
     fs.mkdirSync(caDir, { recursive: true });
 
     try {
-      coreEntry = this.resolveCoreEntryPath();
+      binaryPath = this.resolveBridgeBinary();
     } catch (error) {
       issues.push(error instanceof Error ? error.message : String(error));
     }
 
-    try {
-      const runner = this.resolvePythonRunner();
-      pythonCommand = [runner.command, ...runner.prefixArgs].join(' ').trim();
-      const dep = this.readRuntimeDependencyProbe(runner);
-      pythonVersion = dep.python;
-      pythonExecutable = dep.executable;
-      missingRequired.push(...dep.missingRequired);
-      missingOptional.push(...dep.missingOptional);
-      const [major, minor] = String(dep.python || '0.0.0').split('.').map((v) => Number(v) || 0);
-      if (major < 3 || (major === 3 && minor < 10)) {
-        issues.push(`Bridge core requires Python 3.10 or newer (found ${dep.python || 'unknown'}).`);
-      }
-      if (dep.missingRequired.length > 0) {
-        issues.push(
-          `Missing required Python module(s): ${dep.missingRequired.join(', ')}. Install with: ${this.buildPipInstallCommand(runner, dep.missingRequired)}`,
-        );
-      }
-    } catch (error) {
-      issues.push(error instanceof Error ? error.message : String(error));
-    }
-
-    const ready = issues.length === 0 && missingRequired.length === 0;
+    const ready = issues.length === 0;
     return {
       ready,
-      pythonCommand,
-      pythonVersion,
-      pythonExecutable,
-      coreEntry,
+      binaryPath,
       caDir,
       caCertFile,
       caKeyFile,
       caCertExists: fs.existsSync(caCertFile),
       caKeyExists: fs.existsSync(caKeyFile),
-      missingRequired,
-      missingOptional,
       issues,
     };
   }
 
-  ensureCaFiles(): { caDir: string; caCertFile: string; caKeyFile: string } {
+  async ensureCaFiles(): Promise<{ caDir: string; caCertFile: string; caKeyFile: string }> {
     const { caDir, caCertFile, caKeyFile } = this.resolveCaPaths();
     fs.mkdirSync(caDir, { recursive: true });
 
-    const runner = this.resolvePythonRunner();
-    const coreEntry = this.resolveCoreEntryPath();
-    const coreRoot = path.dirname(coreEntry);
-    const mitmSrc = path.join(coreRoot, 'src');
-    const script = [
-      'import os, sys',
-      `sys.path.insert(0, ${JSON.stringify(mitmSrc)})`,
-      'from mitm import MITMCertManager',
-      'MITMCertManager()',
-      'print("ok")',
-    ].join('\n');
-    const probe = spawnSync(runner.command, [...runner.prefixArgs, '-c', script], {
-      encoding: 'utf-8',
-      timeout: 15000,
+    const binaryPath = this.resolveBridgeBinary();
+
+    const proc = spawn(binaryPath, ['-generate-ca'], {
       env: {
         ...process.env,
         BRIDGE_CA_DIR: caDir,
         BRIDGE_CA_CERT_FILE: caCertFile,
         BRIDGE_CA_KEY_FILE: caKeyFile,
       },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 15000,
     });
-    if (probe.error || probe.status !== 0) {
-      const details = (probe.stderr || probe.stdout || probe.error?.message || 'unknown error').trim();
-      throw new Error(`Failed to generate CA files: ${details}`);
-    }
-    return { caDir, caCertFile, caKeyFile };
+
+    const stderr: Buffer[] = [];
+    proc.stderr?.on('data', (chunk: Buffer) => stderr.push(chunk));
+
+    return new Promise((resolve, reject) => {
+      proc.on('exit', (code) => {
+        if (code === 0) {
+          resolve({ caDir, caCertFile, caKeyFile });
+        } else {
+          const errText = Buffer.concat(stderr).toString('utf-8').trim();
+          reject(new Error(`CA generation failed: ${errText || 'unknown error'}`));
+        }
+      });
+      proc.on('error', (error) => reject(error));
+    });
   }
 
   private resolveCaPaths(): { caDir: string; caCertFile: string; caKeyFile: string } {
@@ -253,67 +201,20 @@ export class BridgeService {
     return { ...this.lastStatus };
   }
 
-  setupRuntimeDependencies(includeOptional = true): ShadeRuntimeSetupResult {
-    const runner = this.resolvePythonRunner();
-    const probe = this.readRuntimeDependencyProbe(runner);
-    const pythonVersion = probe.python || '0.0.0';
-    const [major, minor] = pythonVersion.split('.').map((v) => Number(v) || 0);
-    if (major < 3 || (major === 3 && minor < 10)) {
-      throw new Error(`Bridge core requires Python 3.10 or newer (found ${pythonVersion}).`);
-    }
-
-    const modules = Array.from(
-      new Set([
-        ...probe.missingRequired,
-        ...(includeOptional ? probe.missingOptional : []),
-      ]),
-    );
-
-    if (modules.length === 0) {
+  async setupRuntimeDependencies(_includeOptional = true): Promise<ShadeRuntimeSetupResult> {
+    try {
+      const binaryPath = this.resolveBridgeBinary();
       return {
         ok: true,
-        pythonCommand: [runner.command, ...runner.prefixArgs].join(' ').trim(),
-        pythonVersion,
-        installed: [],
-        skipped: [],
-        message: 'Python runtime is already ready. No missing modules.',
+        binaryPath,
+        message: 'Go bridge core is ready (no runtime dependencies needed).',
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
       };
     }
-
-    const install = spawnSync(
-      runner.command,
-      [...runner.prefixArgs, '-m', 'pip', 'install', '--upgrade', ...modules],
-      {
-        encoding: 'utf-8',
-        timeout: 180000,
-      },
-    );
-
-    if (install.error || install.status !== 0) {
-      const details = (install.stderr || install.stdout || install.error?.message || 'unknown error').trim();
-      throw new Error(`Failed to install Python modules (${modules.join(', ')}): ${details}`);
-    }
-
-    const verified = this.readRuntimeDependencyProbe(runner);
-    const stillMissing = Array.from(
-      new Set([
-        ...verified.missingRequired,
-        ...(includeOptional ? verified.missingOptional : []),
-      ]),
-    );
-    const installed = modules.filter((value) => !stillMissing.includes(value));
-
-    return {
-      ok: stillMissing.length === 0,
-      pythonCommand: [runner.command, ...runner.prefixArgs].join(' ').trim(),
-      pythonVersion: verified.python,
-      installed,
-      skipped: stillMissing,
-      message:
-        stillMissing.length === 0
-          ? `Installed ${installed.length} module(s): ${installed.join(', ')}`
-          : `Installed ${installed.length} module(s), but still missing: ${stillMissing.join(', ')}`,
-    };
   }
 
   getAppsScriptCode(authKey?: string): { code: string; templatePath: string } {
@@ -329,17 +230,19 @@ export class BridgeService {
     return { code, templatePath };
   }
 
-  private resolveCoreEntryPath(): string {
+  private resolveBridgeBinary(): string {
     const envPath = process.env.BRIDGE_CORE_ENTRY?.trim();
     const rootFromSrcOrDist = path.resolve(__dirname, '../../../..');
     const appRoot = path.resolve(process.cwd());
+    const binaryName = process.platform === 'win32' ? 'bridge-core.exe' : 'bridge-core';
+
     const candidates = this.expandAsarPathCandidates([
       envPath || '',
-      path.join(appRoot, 'bridge-core', 'main.py'),
-      path.join(rootFromSrcOrDist, 'bridge-core', 'main.py'),
-      path.join(process.resourcesPath || '', 'app.asar.unpacked', 'bridge-core', 'main.py'),
-      path.join(process.resourcesPath || '', 'bridge-core', 'main.py'),
-      path.join(process.resourcesPath || '', 'app.asar', 'bridge-core', 'main.py'),
+      path.join(appRoot, 'bridge-core', binaryName),
+      path.join(rootFromSrcOrDist, 'bridge-core', binaryName),
+      path.join(process.resourcesPath || '', 'app.asar.unpacked', 'bridge-core', binaryName),
+      path.join(process.resourcesPath || '', 'bridge-core', binaryName),
+      path.join(process.resourcesPath || '', 'app.asar', 'bridge-core', binaryName),
     ]);
 
     for (const candidate of candidates) {
@@ -352,7 +255,7 @@ export class BridgeService {
     }
 
     throw new Error(
-      `Bridge core entry not found. Tried: ${candidates.join(', ')}`,
+      `Bridge core binary not found. Tried: ${candidates.join(', ')}`,
     );
   }
 
@@ -366,7 +269,7 @@ export class BridgeService {
       path.join(rootFromSrcOrDist, 'bridge-core', 'apps_script', 'Code.gs'),
       path.join(process.resourcesPath || '', 'app.asar.unpacked', 'bridge-core', 'apps_script', 'Code.gs'),
       path.join(process.resourcesPath || '', 'bridge-core', 'apps_script', 'Code.gs'),
-      path.join(process.resourcesPath || '', 'app.asar', 'bridge-core', 'apps_script', 'Code.gs'),
+      path.join(process.resourcesPath || '', 'app.asar', 'bridge-core', 'Code.gs'),
     ]);
 
     for (const candidate of candidates) {
@@ -378,157 +281,6 @@ export class BridgeService {
     throw new Error(
       `Bridge Apps Script template not found. Tried: ${candidates.join(', ')}`,
     );
-  }
-
-  private resolvePythonRunner(): PythonRunner {
-    const envCandidate = process.env.BRIDGE_PYTHON_BIN?.trim();
-    const candidates: PythonRunner[] = [];
-
-    if (envCandidate) {
-      candidates.push({ command: envCandidate, prefixArgs: [] });
-    }
-    if (process.env.PYTHON?.trim()) {
-      candidates.push({ command: String(process.env.PYTHON).trim(), prefixArgs: [] });
-    }
-
-    if (process.platform !== 'win32') {
-      const absoluteCandidates = [
-        '/opt/anaconda3/bin/python3',
-        '/opt/anaconda3/bin/python',
-        '/opt/homebrew/bin/python3',
-        '/usr/local/bin/python3',
-      ];
-      for (const absPath of absoluteCandidates) {
-        if (fs.existsSync(absPath)) {
-          candidates.push({ command: absPath, prefixArgs: [] });
-        }
-      }
-    }
-
-    if (process.platform === 'win32') {
-      candidates.push({ command: 'py', prefixArgs: ['-3'] });
-      candidates.push({ command: 'python', prefixArgs: [] });
-    } else {
-      candidates.push({ command: 'python3', prefixArgs: [] });
-      candidates.push({ command: 'python', prefixArgs: [] });
-    }
-
-    const dedup = new Set<string>();
-    const uniqueCandidates = candidates.filter((candidate) => {
-      const key = `${candidate.command}::${candidate.prefixArgs.join(' ')}`;
-      if (dedup.has(key)) return false;
-      dedup.add(key);
-      return true;
-    });
-
-    let firstRunnable: PythonRunner | null = null;
-    for (const candidate of uniqueCandidates) {
-      const probe = spawnSync(candidate.command, [...candidate.prefixArgs, '--version'], {
-        encoding: 'utf-8',
-        timeout: 4000,
-      });
-      if (probe.error || probe.status !== 0) {
-        continue;
-      }
-
-      if (!firstRunnable) {
-        firstRunnable = candidate;
-      }
-
-      try {
-        const dep = this.readRuntimeDependencyProbe(candidate);
-        const [major, minor] = String(dep.python || '0.0.0').split('.').map((v) => Number(v) || 0);
-        if ((major > 3 || (major === 3 && minor >= 10)) && dep.missingRequired.length === 0) {
-          return candidate;
-        }
-      } catch {
-        // Try next candidate.
-      }
-    }
-
-    if (firstRunnable) {
-      return firstRunnable;
-    }
-
-    const tried = uniqueCandidates.map((value) => `${value.command} ${value.prefixArgs.join(' ')}`.trim()).join(', ');
-    throw new Error(`Python runtime not found for Shade core. Tried: ${tried}`);
-  }
-
-  private verifyRuntimeDependencies(runner: PythonRunner): ShadeDependencyProbe {
-    const result = this.readRuntimeDependencyProbe(runner);
-    const pythonVersion = result.python || '0.0.0';
-    const [major, minor] = pythonVersion.split('.').map((v) => Number(v) || 0);
-    if (major < 3 || (major === 3 && minor < 10)) {
-      throw new Error(
-        `Bridge core requires Python 3.10 or newer (found ${pythonVersion}).`,
-      );
-    }
-
-    if (result.missingRequired.length > 0) {
-      const installCmd = this.buildPipInstallCommand(runner, result.missingRequired);
-      throw new Error(
-        `Bridge is missing required Python module(s): ${result.missingRequired.join(', ')}. Install them with: ${installCmd}`,
-      );
-    }
-
-    if (result.missingOptional.length > 0) {
-      debugLogger.warn('BridgeService', 'Optional Bridge Python module(s) missing', {
-        missing: result.missingOptional.join(', '),
-        note: 'Bridge can run, but performance/features may be reduced.',
-      });
-    }
-
-    return result;
-  }
-
-  private readRuntimeDependencyProbe(runner: PythonRunner): ShadeDependencyProbe {
-    const probeScript = `
-import importlib.util, json, platform, sys
-required = ["cryptography"]
-optional = ["h2", "certifi"]
-result = {
-  "python": platform.python_version(),
-  "executable": sys.executable,
-  "missingRequired": [m for m in required if importlib.util.find_spec(m) is None],
-  "missingOptional": [m for m in optional if importlib.util.find_spec(m) is None],
-}
-print(json.dumps(result))
-`.trim();
-
-    const probe = spawnSync(runner.command, [...runner.prefixArgs, '-c', probeScript], {
-      encoding: 'utf-8',
-      timeout: 7000,
-    });
-
-    if (probe.error || probe.status !== 0) {
-      const details = (probe.stderr || probe.stdout || probe.error?.message || 'unknown error').trim();
-      throw new Error(
-        `Unable to verify Bridge Python dependencies using '${runner.command}'. ${details}`,
-      );
-    }
-
-    let result: ShadeDependencyProbe | null = null;
-    try {
-      result = JSON.parse(String(probe.stdout || '').trim()) as ShadeDependencyProbe;
-    } catch {
-      throw new Error(
-        `Dependency check returned unexpected output: ${String(probe.stdout || '').trim() || 'empty output'}`,
-      );
-    }
-
-    if (!result) {
-      throw new Error('Dependency check failed with empty result.');
-    }
-
-    return result;
-  }
-
-  private buildPipInstallCommand(runner: PythonRunner, modules: string[]): string {
-    const moduleList = modules.join(' ');
-    if (runner.command === 'py') {
-      return `py -3 -m pip install ${moduleList}`;
-    }
-    return `${runner.command} -m pip install ${moduleList}`;
   }
 
   private writeCoreConfig(config: ShadeConfig): string {
@@ -561,7 +313,6 @@ print(json.dumps(result))
       max_response_body_bytes: config.maxResponseBodyBytes,
       lan_sharing: config.lanSharing,
       log_level: 'INFO',
-      youtube_via_relay: false,
       ca_cert_file: config.caCertFile || '',
       ca_key_file: config.caKeyFile || '',
     };
@@ -581,10 +332,12 @@ print(json.dumps(result))
     envOverrides.BRIDGE_CA_CERT_FILE = this.config?.caCertFile || path.join(caDir, 'ca.crt');
     envOverrides.BRIDGE_CA_KEY_FILE = this.config?.caKeyFile || path.join(caDir, 'ca.key');
     this.lastCoreOutput = '';
+
+    debugLogger.info('BridgeService', `Spawning: ${command} ${args.join(' ')}`);
+
     const proc = spawn(command, args, {
       env: {
         ...process.env,
-        PYTHONUNBUFFERED: '1',
         ...envOverrides,
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -784,7 +537,6 @@ print(json.dumps(result))
           host,
           port: config.socks5Port,
         });
-        return;
       }
 
       await systemProxyManager.setHttpProxy({

@@ -43,17 +43,12 @@ type ProbeResult = { ip: string; latencyMs?: number; error?: string };
 type ScriptEntry = { id: string; key: string };
 type RuntimeDiagnostics = {
   ready: boolean;
-  pythonCommand?: string;
-  pythonVersion?: string;
-  pythonExecutable?: string;
-  coreEntry?: string;
+  binaryPath?: string;
   caDir?: string;
   caCertFile?: string;
   caKeyFile?: string;
   caCertExists?: boolean;
   caKeyExists?: boolean;
-  missingRequired?: string[];
-  missingOptional?: string[];
   issues?: string[];
 };
 
@@ -95,7 +90,6 @@ export default function BridgePanel() {
   const [previewAuthKey, setPreviewAuthKey] = useState('');
   const [copyDone, setCopyDone] = useState(false);
   const [runtime, setRuntime] = useState<RuntimeDiagnostics | null>(null);
-  const [runtimeSetupBusy, setRuntimeSetupBusy] = useState(false);
 
   const activeScripts = useMemo(
     () => scripts.map((value) => ({ id: value.id.trim(), key: value.key.trim() })).filter((value) => value.id && value.key),
@@ -302,22 +296,10 @@ export default function BridgePanel() {
 
   const handleSetupRuntime = async () => {
     try {
-      setRuntimeSetupBusy(true);
       setError('');
-      const setupRuntimeFn = (window.electronAPI as any)?.bridge?.setupRuntime;
-      if (typeof setupRuntimeFn !== 'function') {
-        throw new Error('Runtime setup API is unavailable. Please restart the app to load the latest Bridge features.');
-      }
-      const res = await setupRuntimeFn({ includeOptional: true });
-      if (!res?.success) throw new Error(res?.error || 'Runtime setup failed');
       await loadRuntimeDiagnostics();
-      if (res.data?.message) {
-        setError('');
-      }
     } catch (err: any) {
-      setError(err?.message || 'Failed to setup Python runtime');
-    } finally {
-      setRuntimeSetupBusy(false);
+      setError(err?.message || 'Failed to check bridge runtime');
     }
   };
 
@@ -342,19 +324,18 @@ export default function BridgePanel() {
                       color: runtime?.ready ? 'success.main' : 'warning.main',
                     }}
                   >
-                    Python Runtime: {runtime?.ready ? 'Ready' : 'Needs setup'}
+                    Bridge Core: {runtime?.ready ? 'Ready' : 'Not ready'}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {runtime?.pythonVersion ? `Python ${runtime.pythonVersion}` : 'Python 3.10+ required'} · Required: cryptography · Optional: h2, certifi
+                    {runtime?.binaryPath ? `Binary: ${runtime.binaryPath}` : 'Go bridge core binary'} · CA: {runtime?.caCertExists ? 'ok' : 'missing'}
                   </Typography>
                 </Box>
                 <Button
                   size="small"
                   variant="outlined"
                   onClick={handleSetupRuntime}
-                  disabled={runtimeSetupBusy || busy || runtime?.ready === true}
                 >
-                  {runtimeSetupBusy ? <CircularProgress size={14} /> : 'Setup Python + Libs'}
+                  Refresh Status
                 </Button>
               </Stack>
             </CardContent>

@@ -12,7 +12,8 @@
     "dist/package.json",
     "build",
     "v2ray-core",
-    "bridge-core"
+    "bridge-core/bridge-core*",
+    "bridge-core/apps_script"
   ],
   "asar": {
     "smartUnpack": true
@@ -21,7 +22,8 @@
     "dist/main/preload.js",
     "v2ray-core/**/*",
     "build/**/*",
-    "bridge-core/**/*"
+    "bridge-core/bridge-core*",
+    "bridge-core/apps_script/**/*"
   ],
   "extraMetadata": {
     "main": "dist/main/main/index.js"

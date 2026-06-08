@@ -1,6 +1,6 @@
 {
   "name": "v2ray-vpn",
-  "version": "0.3.0-beta.1",
+  "version": "0.4.0-beta.1",
   "description": "V2Ray VPN client with per-app routing support",
   "author": "V2Ray VPN Team",
   "main": "dist/main/main/index.js",
@@ -8,18 +8,17 @@
   "type": "module",
   "scripts": {
     "generate-icon": "node scripts/generate-icon.js",
-    "dev": "npm run generate-icon && npm run build:main && concurrently \"npm run dev:electron\" \"npm run dev:renderer\"",
+    "build:bridge": "node scripts/build-bridge-go.cjs",
+    "build:main": "tsc --project tsconfig.main.json",
+    "build:renderer": "react-scripts build",
+    "fix:package": "node -e \"const pkg = require('./package.json'); pkg.type = 'commonjs'; require('fs').writeFileSync('./dist/package.json', JSON.stringify(pkg, null, 2))\"",
+    "dev": "npm run generate-icon && npm run build:bridge && npm run build:main && concurrently \"npm run dev:electron\" \"npm run dev:renderer\"",
     "dev:electron": "NODE_ENV=development wait-on http://localhost:3000 && NODE_ENV=development electron .",
     "dev:renderer": "NODE_ENV=development react-scripts start",
-    "build": "npm run generate-icon && npm run build:renderer && npm run build:main && npm run fix:package",
-    "build:renderer": "react-scripts build",
-    "build:main": "tsc --project tsconfig.main.json",
-    "fix:package": "node -e \"const pkg = require('./package.json'); pkg.type = 'commonjs'; require('fs').writeFileSync('./dist/package.json', JSON.stringify(pkg, null, 2))\"",
+    "build": "npm run generate-icon && npm run build:bridge && npm run build:renderer && npm run build:main && npm run fix:package",
     "pack": "electron-builder --publish=never",
     "dist": "npm run build && electron-builder --publish=never",
-    "dist:github": "npm run build && electron-builder --publish=always",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "dist:github": "npm run build && electron-builder --publish=always"
   },
   "dependencies": {
     "@emotion/react": "^11.11.0",
