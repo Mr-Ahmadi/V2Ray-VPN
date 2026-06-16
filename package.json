@@ -1,0 +1,73 @@
+{
+  "name": "v2ray-vpn",
+  "version": "1.0.0",
+  "description": "V2Ray VPN client with per-app routing support",
+  "author": "V2Ray VPN Team",
+  "main": "dist/main/main/index.js",
+  "homepage": "./",
+  "type": "module",
+  "scripts": {
+    "generate-icon": "node scripts/generate-icon.js",
+    "build:main": "tsc --project tsconfig.main.json",
+    "build:renderer": "react-scripts build",
+    "fix:package": "node -e \"const pkg = require('./package.json'); pkg.type = 'commonjs'; require('fs').writeFileSync('./dist/package.json', JSON.stringify(pkg, null, 2))\"",
+    "dev": "npm run generate-icon && npm run build:main && concurrently \"npm run dev:electron\" \"npm run dev:renderer\"",
+    "dev:electron": "NODE_ENV=development wait-on http://localhost:3000 && NODE_ENV=development electron .",
+    "dev:renderer": "NODE_ENV=development react-scripts start",
+    "build": "npm run generate-icon && npm run build:renderer && npm run build:main && npm run fix:package",
+    "pack": "electron-builder --publish=never",
+    "dist": "npm run build && electron-builder --publish=never",
+    "dist:github": "npm run build && electron-builder --publish=always"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.11.0",
+    "@emotion/styled": "^11.11.0",
+    "@mui/icons-material": "^5.14.0",
+    "@mui/material": "^5.14.0",
+    "axios": "^1.4.0",
+    "dotenv": "^16.3.1",
+    "electron-squirrel-startup": "^1.0.1",
+    "express": "^4.18.2",
+    "uuid": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.3.1",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "concurrently": "^8.2.0",
+    "electron": "^26.0.0",
+    "electron-builder": "^24.6.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "sharp": "^0.33.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^4.9.5",
+    "wait-on": "^9.0.3"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app"
+    ]
+  },
+  "jest": {
+    "moduleNameMapper": {
+      "^(\\.{1,2}/.*)\\.js$": "$1"
+    },
+    "transformIgnorePatterns": [
+      "node_modules/(?!(uuid)/)"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "appId": "com.v2ray.vpn",
+  "productName": "V2Ray VPN",
+  "directories": {
+    "buildResources": "public",
+    "output": "dist"
+  },
+  "artifactName": "V2Ray-VPN-${version}-${arch}.${ext}",
+  "files": [
+    "package.json",
+    "dist/main",
+    "dist/package.json",
+    "build",
+    "v2ray-core"
+  ],
+  "asar": {
+    "smartUnpack": true
+  },
+  "asarUnpack": [
+    "dist/main/preload.js",
+    "v2ray-core/**/*",
+    "build/**/*"
+  ],
+  "extraMetadata": {
+    "main": "dist/main/main/index.js"
+  },
+  "publish": [
+    {
+      "provider": "github",
+      "owner": "Mr-Ahmadi",
+      "repo": "V2RAY-VPN",
+      "releaseType": "release"
+    }
+  ],
+  "mac": {
+    "target": [
+      "dmg",
+      "zip"
+    ],
+    "category": "public.app-category.utilities",
+    "sign": false,
+    "identity": null
+  },
+  "dmg": {
+    "contents": [
+      {
+        "x": 110,
+        "y": 150,
+        "type": "file"
+      },
+      {
+        "x": 240,
+        "y": 150,
+        "type": "link",
+        "path": "/Applications"
+      }
+    ]
+  },
+  "win": {
+    "target": [
+      "nsis",
+      "portable"
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
+  },
+  "linux": {
+    "target": [
+      "AppImage",
+      "deb"
+    ],
+    "category": "Utility"
+  }
+}
