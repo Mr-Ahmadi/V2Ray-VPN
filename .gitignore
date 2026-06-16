@@ -45,7 +45,6 @@ __pycache__/
 *.pyc
 
 # Assets (generated/gitignored)
-Screenshot.png
 *.icns
 *.ico
 
