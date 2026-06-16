@@ -89,16 +89,6 @@ export default function Navbar() {
     setAnchorEl(null);
   };
 
-  const handleDisconnectVpn = async () => {
-    try {
-      await window.electronAPI.v2ray.disconnect();
-      setVpnStatus({ connected: false, state: 'disconnected' });
-    } catch (error) {
-      console.error('Disconnect VPN error:', error);
-    }
-    handleMenuClose();
-  };
-
   const handleDisconnectAll = async () => {
     try {
       await window.electronAPI.v2ray.disconnect();

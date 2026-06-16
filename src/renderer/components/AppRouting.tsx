@@ -25,7 +25,6 @@ import {
   Typography,
 } from '@mui/material';
 import {
-  Apps as AppsIcon,
   DirectionsRun as BypassIcon,
   Public as NetIcon,
   Search as SearchIcon,
@@ -95,23 +94,10 @@ export default function AppRouting() {
           new Map(appsResult.data.map((app: App) => [app.path, app])).values()
         ) as App[];
 
-        // Define priority order based on engine type
-        const getPriority = (app: App) => {
-          const engine = detectEngine(app.name);
-          if (engine === 'chromium') return 1; // Reliable
-          if (engine === 'safari') return 3;   // Best-effort (system proxy)
-          return 2;                            // Best-effort (relaunch) - firefox, telegram, generic
-        };
+        const reliableApps = uniqueApps.filter(app => detectEngine(app.name) === 'chromium');
+        reliableApps.sort((a, b) => a.name.localeCompare(b.name));
 
-        setAllApps(uniqueApps.sort((a, b) => {
-          const priorityA = getPriority(a);
-          const priorityB = getPriority(b);
-
-          if (priorityA !== priorityB) {
-            return priorityA - priorityB;
-          }
-          return a.name.localeCompare(b.name);
-        }));
+        setAllApps(reliableApps);
       }
       if (policyResult.success) {
         setAppPolicies(policyResult.data);
@@ -130,6 +116,12 @@ export default function AppRouting() {
 
   useEffect(() => {
     loadApps();
+  }, [loadApps]);
+
+  useEffect(() => {
+    const onSettingsSaved = () => loadApps();
+    window.addEventListener('settings:saved', onSettingsSaved);
+    return () => window.removeEventListener('settings:saved', onSettingsSaved);
   }, [loadApps]);
 
   const policyByPath = useMemo(() => {
@@ -175,52 +167,15 @@ export default function AppRouting() {
     const lowerName = appName.toLowerCase();
     const chromiumNames = ['chrome', 'edge', 'brave', 'opera', 'vivaldi', 'chromium', 'arc'];
     if (chromiumNames.some((name) => lowerName.includes(name))) return 'chromium';
-    if (lowerName.includes('firefox')) return 'firefox';
-    if (lowerName.includes('telegram')) return 'telegram';
-    if (lowerName.includes('safari')) return 'safari';
     return 'generic';
   };
 
-  const getEngineIndicator = (appName: string): { label: string; color: string } => {
-    const engine = detectEngine(appName);
-    if (engine === 'chromium') {
-      return { label: 'Reliable', color: 'var(--success)' };
-    }
-    if (engine === 'safari') {
-      return { label: 'Best-effort (system proxy)', color: 'var(--accent)' };
-    }
-    return { label: 'Best-effort (relaunch)', color: 'var(--secondary)' };
-  };
-
-  const isBypassUnavailable = (appName: string): boolean => {
-    const engine = detectEngine(appName);
-    const proxyMode = effectiveProxyMode;
-    return engine === 'safari' && (proxyMode === 'global' || proxyMode === 'pac');
-  };
-
-  const isVpnUnavailable = (appName: string): boolean => {
-    const engine = detectEngine(appName);
-    const proxyMode = effectiveProxyMode;
-    return engine === 'safari' && proxyMode === 'per-app';
+  const getEngineIndicator = (): { label: string; color: string } => {
+    return { label: 'Reliable', color: 'var(--success)' };
   };
 
   const setPolicy = async (appPath: string, policy: AppRoutePolicy) => {
-    const app = allApps.find((item) => item.path === appPath);
-    if (policy === 'bypass' && app && isBypassUnavailable(app.name)) {
-      setNotice({
-        severity: 'error',
-        message: 'Bypass is not enforceable for Safari in Global/PAC mode. Switch Proxy Mode to per-app.',
-      });
-      return;
-    }
-    if (policy === 'vpn' && app && isVpnUnavailable(app.name)) {
-      setNotice({
-        severity: 'error',
-        message: 'Use VPN is not enforceable for Safari in per-app mode. Use Global/PAC mode for Safari VPN routing.',
-      });
-      return;
-    }
-
+    const appName = allApps.find(a => a.path === appPath)?.name || appPath;
     setBusyAppPath(appPath);
     try {
       const result = await window.electronAPI.routing.setAppPolicy(appPath, policy);
@@ -234,7 +189,7 @@ export default function AppRouting() {
         if (policy === 'none') {
           return withoutCurrent;
         }
-        return [...withoutCurrent, { appPath, appName: app?.name || appPath, policy }];
+        return [...withoutCurrent, { appPath, appName, policy }];
       });
 
       await loadDiagnostics();
@@ -259,21 +214,6 @@ export default function AppRouting() {
     const defaultRouteIsProxy = effectiveProxyMode !== 'per-app';
     const effectivePolicy: 'bypass' | 'vpn' =
       policy === 'none' ? (defaultRouteIsProxy ? 'vpn' : 'bypass') : policy;
-
-    if (effectivePolicy === 'bypass' && isBypassUnavailable(app.name)) {
-      setNotice({
-        severity: 'error',
-        message: 'Bypass is not enforceable for Safari in Global/PAC mode. Switch Proxy Mode to per-app.',
-      });
-      return;
-    }
-    if (effectivePolicy === 'vpn' && isVpnUnavailable(app.name)) {
-      setNotice({
-        severity: 'error',
-        message: 'Use VPN is not enforceable for Safari in per-app mode. Use Global/PAC mode for Safari VPN routing.',
-      });
-      return;
-    }
 
     setBusyAppPath(app.path);
     try {
@@ -303,15 +243,7 @@ export default function AppRouting() {
     }
   };
 
-  const isBrowserLike = (appName: string) => {
-    const browsers = ['chrome', 'firefox', 'safari', 'edge', 'brave', 'opera'];
-    return browsers.some((b) => appName.toLowerCase().includes(b));
-  };
-
-  const getAppIcon = (appName: string) => {
-    if (isBrowserLike(appName)) return <NetIcon sx={{ color: 'var(--accent)' }} />;
-    return <AppsIcon sx={{ color: 'var(--text-secondary)' }} />;
-  };
+  const getAppIcon = () => <NetIcon sx={{ color: 'var(--accent)' }} />;
 
   const getPolicyLabel = (policy: AppRoutePolicy): string => {
     switch (policy) {
@@ -427,15 +359,13 @@ export default function AppRouting() {
               filteredApps.map((app, index) => {
                 const policy = policyByPath.get(app.path) || 'none';
                 const isBusy = busyAppPath === app.path;
-                const engineInfo = getEngineIndicator(app.name);
-                const bypassUnavailable = isBypassUnavailable(app.name);
-                const vpnUnavailable = isVpnUnavailable(app.name);
+                const engineInfo = getEngineIndicator();
                 return (
                   <React.Fragment key={app.path}>
                     {index > 0 && <Divider sx={{ borderColor: 'rgba(255,255,255,0.05)' }} />}
                     <ListItem disablePadding>
                       <ListItemButton sx={{ py: 1.1, '&:hover': { backgroundColor: 'rgba(20, 184, 166, 0.08)' } }}>
-                        <ListItemIcon sx={{ minWidth: 38 }}>{getAppIcon(app.name)}</ListItemIcon>
+                        <ListItemIcon sx={{ minWidth: 38 }}>{getAppIcon()}</ListItemIcon>
                         <ListItemText
                           primary={
                             <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
@@ -476,13 +406,13 @@ export default function AppRouting() {
                             }}
                           >
                             <MenuItem value="none">{followGlobalLabel}</MenuItem>
-                            <MenuItem value="bypass" disabled={bypassUnavailable}>
+                            <MenuItem value="bypass">
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <BypassIcon sx={{ fontSize: 16, color: 'var(--secondary)' }} />
                                 Bypass VPN
                               </Box>
                             </MenuItem>
-                            <MenuItem value="vpn" disabled={vpnUnavailable}>
+                            <MenuItem value="vpn">
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <ProxyIcon sx={{ fontSize: 16, color: 'var(--primary)' }} />
                                 Use VPN
@@ -504,20 +434,6 @@ export default function AppRouting() {
                         </Stack>
                       </ListItemButton>
                     </ListItem>
-                    {bypassUnavailable && (
-                      <Box sx={{ px: 2, pb: 1 }}>
-                        <Typography variant="caption" sx={{ color: 'var(--text-muted)' }}>
-                          Bypass is unavailable for Safari while Proxy Mode is Global/PAC.
-                        </Typography>
-                      </Box>
-                    )}
-                    {vpnUnavailable && (
-                      <Box sx={{ px: 2, pb: 1 }}>
-                        <Typography variant="caption" sx={{ color: 'var(--text-muted)' }}>
-                          Use VPN is unavailable for Safari while Proxy Mode is per-app.
-                        </Typography>
-                      </Box>
-                    )}
                   </React.Fragment>
                 );
               })

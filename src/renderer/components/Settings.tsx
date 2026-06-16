@@ -78,6 +78,7 @@ export default function Settings() {
 
   useEffect(() => {
     loadSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadSettings = async () => {
@@ -157,6 +158,7 @@ export default function Settings() {
       }
 
       setSaveMessage({ type: 'success', text: 'Settings saved successfully.' });
+      window.dispatchEvent(new CustomEvent('settings:saved'));
     } catch (error: any) {
       console.error('Error saving settings:', error);
       setSaveMessage({ type: 'error', text: error?.message || 'Failed to save settings.' });
@@ -658,18 +660,13 @@ export default function Settings() {
                   </Typography>
                 )}
 
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={0.5} sx={{ mt: 1.1 }}>
+                <Box sx={{ mt: 1.1 }}>
                   <FormControlLabel
                     control={<Switch checked={settings.blockAds !== false} onChange={(e) => handleSettingChange('blockAds', e.target.checked)} />}
                     label="Block ads and trackers"
                     sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.84rem' } }}
                   />
-                  <FormControlLabel
-                    control={<Switch checked={settings.shareUsageData || false} onChange={(e) => handleSettingChange('shareUsageData', e.target.checked)} />}
-                    label="Share anonymous usage data"
-                    sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.84rem' } }}
-                  />
-                </Stack>
+                </Box>
               </CardContent>
             </Card>
           </Grid>

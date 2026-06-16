@@ -133,7 +133,13 @@ rm -f v2ray.zip
 echo -e "${GREEN}✓ Cleaned up zip file${NC}"
 
 echo ""
-echo -e "${YELLOW}Step 5: Setting permissions${NC}"
+echo -e "${YELLOW}Step 5: Renaming binary and setting permissions${NC}"
+
+# Rename xray to v2ray (app expects v2ray binary)
+if [ -f "xray" ]; then
+  mv xray v2ray
+  echo -e "${GREEN}✓ Renamed xray to v2ray${NC}"
+fi
 
 # Make binary executable
 chmod +x v2ray
@@ -197,11 +203,5 @@ echo "For more information, see README.md and SETUP.md"
 echo ""
 
 echo "🎉 Setup complete!"
-echo ""
-echo "Next steps:"
-echo "1. Download Xray-core from: https://github.com/XTLS/Xray-core/releases"
-echo "2. Extract and place 'xray' binary in the 'v2ray-core' directory as 'v2ray'"
-echo "3. Make it executable: chmod +x v2ray-core/v2ray"
-echo "4. Run: npm run dev"
 echo ""
 echo "For more information, see README.md"
